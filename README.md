@@ -66,14 +66,18 @@ Returns the current `JobState` (see [`lib/types.ts`](./lib/types.ts)). Frontend 
 
 ## Deploy
 
-Render Web Service:
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/shikhar-lyzr/thai-life-demo-ui)
+
+`render.yaml` blueprint is in the repo root. The button above provisions the service automatically; you only need to paste `LYZR_API_KEY` and `WRAPPER_KEY` when prompted.
+
+Manual setup if needed:
 - Runtime: Node
 - Build: `npm install && npm run build`
 - Start: `npm start`
 - Branch: `main`
-- Env vars: `LYZR_API_KEY`, `WRAPPER_KEY` (and optional overrides)
+- Env vars: `LYZR_API_KEY`, `WRAPPER_KEY` (`WRAPPER_URL` and `LYZR_BASE_URL` default to production values)
 
-Render keeps the Node process alive — important because the in-memory job store and the long-running orchestrator (~12 min per job) won't survive serverless cold starts. Do not deploy to Vercel.
+Render keeps the Node process alive — important because the in-memory job store and the long-running orchestrator (~6-12 min per job) won't survive serverless cold starts. Do not deploy to Vercel.
 
 ## Hard constraints
 
