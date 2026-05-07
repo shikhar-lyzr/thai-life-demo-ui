@@ -1,36 +1,83 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# thai-life-demo-ui
 
-## Getting Started
+Next.js front-end + thin backend orchestrator for the Thai Life Insurance PoC. Takes a PDF upload, runs it through the [vlm-reparse-wrapper](https://github.com/shikhar-lyzr/vlm-reparse-wrapper) service and three Lyzr agents (Classification, Extraction, Summarisation) in parallel, and renders the final underwriter brief.
 
-First, run the development server:
+Replaces the LAO workflow path entirely. See [BRIEF.md](./BRIEF.md) for full context and [docs/superpowers/plans/](./docs/superpowers/plans/) for the implementation plan.
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+## Architecture
+
+```
+[Next.js frontend]                    [Backend API routes]
+  Upload PDF       →  POST /api/jobs   ─┐
+  Poll status      ←  GET  /api/jobs/:id │
+  Render results   ←                     │
+                                         ▼
+                              ┌──────────────────────────┐
+                              │ 1. Upload to Lyzr (no VLM)│  ~3s
+                              ├──────────────────────────┤
+                              │ 2. Wrapper VLM re-parse   │  ~10s
+                              ├──────────────────────────┤
+                              │ 3. Three agents IN        │
+                              │    PARALLEL:              │
+                              │    - Classification ~4m   │
+                              │    - Extraction ~11m      │
+                              │    - Summarisation ~11m   │  total ~11m (parallel)
+                              └──────────────────────────┘
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+State is an in-memory `Map` in the long-running Node process (single-instance demo).
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Setup
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+```bash
+cp .env.local.example .env.local
+# fill in LYZR_API_KEY and WRAPPER_KEY
+npm install
+npm run dev
+```
 
-## Learn More
+Open <http://localhost:3000>.
 
-To learn more about Next.js, take a look at the following resources:
+## Env vars
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+| Var | Required | Default |
+|---|---|---|
+| `LYZR_API_KEY` | yes | — |
+| `WRAPPER_KEY` | yes | — |
+| `WRAPPER_URL` | no | `https://vlm-reparse-wrapper.onrender.com` |
+| `LYZR_BASE_URL` | no | `https://agent-prod.studio.lyzr.ai` |
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+## Tests
 
-## Deploy on Vercel
+```bash
+npm test          # run vitest once
+npm run test:watch
+```
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+26 unit tests covering env loading, Lyzr API helpers, wrapper helper, in-memory job store, and orchestrator (parallel dispatch, partial-failure handling, upload/wrapper short-circuit).
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+## API
+
+### `POST /api/jobs`
+Multipart form with `file` field (PDF, max 25 MB). Returns `{ job_id, status: "queued" }` and starts the pipeline in the background.
+
+### `GET /api/jobs/:id`
+Returns the current `JobState` (see [`lib/types.ts`](./lib/types.ts)). Frontend polls every 3 s.
+
+## Deploy
+
+Render Web Service:
+- Runtime: Node
+- Build: `npm install && npm run build`
+- Start: `npm start`
+- Branch: `main`
+- Env vars: `LYZR_API_KEY`, `WRAPPER_KEY` (and optional overrides)
+
+Render keeps the Node process alive — important because the in-memory job store and the long-running orchestrator (~12 min per job) won't survive serverless cold starts. Do not deploy to Vercel.
+
+## Hard constraints
+
+- Don't proxy `LYZR_API_KEY` through the frontend — all `/v3/*` calls happen in API route handlers.
+- Don't modify the three locked agent prompts in Lyzr Studio.
+- Don't add an LAO workflow node anywhere — the whole point of this build is to bypass LAO.
+- Don't switch the wrapper's VLM model from `gpt-4o`.
