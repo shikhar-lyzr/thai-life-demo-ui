@@ -1,0 +1,20 @@
+services:
+  - type: web
+    name: thai-life-demo-ui
+    runtime: node
+    plan: starter
+    region: singapore
+    buildCommand: npm install && npm run build
+    startCommand: npm start
+    healthCheckPath: /
+    envVars:
+      - key: LYZR_API_KEY
+        sync: false
+      - key: WRAPPER_KEY
+        sync: false
+      - key: WRAPPER_URL
+        value: https://vlm-reparse-wrapper.onrender.com
+      - key: LYZR_BASE_URL
+        value: https://agent-prod.studio.lyzr.ai
+      - key: NODE_ENV
+        value: production
