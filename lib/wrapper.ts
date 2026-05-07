@@ -8,7 +8,20 @@ export interface WrapperResult {
   elapsed_ms: number;
 }
 
-const COLD_START_BACKOFFS_MS = [3000, 8000, 15000, 30000];
+// Render free-tier cold-start can take up to ~60s. These backoffs span 3+8+15+30+60 = 116s,
+// giving the wrapper a full cold-start cycle to come up before we give up.
+const COLD_START_BACKOFFS_MS = [3000, 8000, 15000, 30000, 60000];
+
+export async function pingWrapper(env: Env): Promise<void> {
+  // Fire-and-forget pre-warm. Caller does not await this — it just kicks the
+  // wrapper out of free-tier idle so by the time we POST /api/vlm-reparse it's
+  // ready to serve.
+  try {
+    await fetch(`${env.wrapperUrl}/health`, { method: "GET" });
+  } catch {
+    // ignored — pre-warm is best-effort
+  }
+}
 
 export async function callWrapper(env: Env, sourceAssetId: string): Promise<WrapperResult> {
   // Wrapper runs on Render free tier and may cold-start (~50s). Retry on 5xx

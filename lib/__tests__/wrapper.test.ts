@@ -73,11 +73,11 @@ describe("callWrapper", () => {
     }) as unknown as typeof fetch;
 
     const promise = callWrapper(env, "src-1");
-    // backoffs sum: 3+8+15+30 = 56s; advance well past
-    await vi.advanceTimersByTimeAsync(120_000);
+    // backoffs sum: 3+8+15+30+60 = 116s; advance well past
+    await vi.advanceTimersByTimeAsync(180_000);
     await expect(promise).rejects.toThrow(/wrapper/i);
-    // 1 initial + 4 retries = 5 calls
-    expect((global.fetch as unknown as ReturnType<typeof vi.fn>)).toHaveBeenCalledTimes(5);
+    // 1 initial + 5 retries = 6 calls
+    expect((global.fetch as unknown as ReturnType<typeof vi.fn>)).toHaveBeenCalledTimes(6);
   });
 
   it("does not retry on 4xx (e.g. 401 unauthorized)", async () => {

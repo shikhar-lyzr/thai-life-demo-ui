@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { uploadToLyzr, callAgent } from "./lyzr";
-import { callWrapper } from "./wrapper";
+import { callWrapper, pingWrapper } from "./wrapper";
 import { setJobStatus, setResult, updateStage, getJob } from "./jobs";
 import type { Env } from "./env";
 import { AGENTS } from "./types";
@@ -9,6 +9,10 @@ export async function processPdf(env: Env, jobId: string, pdfBytes: Buffer): Pro
   setJobStatus(jobId, "running");
   const job = getJob(jobId);
   const fileName = job?.file_name ?? "upload.pdf";
+
+  // Pre-warm the wrapper while we upload to Lyzr — Render free tier can spin
+  // down on idle (~50s cold-start). Fire-and-forget; we don't await it.
+  void pingWrapper(env);
 
   // Stage 1: Upload (no VLM — wrapper handles VLM)
   let sourceAssetId: string;
