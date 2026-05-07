@@ -1,4 +1,13 @@
+import { Agent, fetch as undiciFetch } from "undici";
 import type { Env } from "./env";
+
+const TWENTY_MIN_MS = 20 * 60 * 1000;
+
+const longRunningAgent = new Agent({
+  headersTimeout: TWENTY_MIN_MS,
+  bodyTimeout: TWENTY_MIN_MS,
+  connectTimeout: 30_000,
+});
 
 export async function uploadToLyzr(env: Env, pdfBytes: Buffer, fileName: string): Promise<string> {
   const form = new FormData();
@@ -29,7 +38,9 @@ export interface CallAgentArgs {
 }
 
 export async function callAgent(env: Env, args: CallAgentArgs): Promise<string> {
-  const resp = await fetch(`${env.lyzrBaseUrl}/v3/inference/chat/`, {
+  // Use undici directly with extended timeouts. Lyzr's inference endpoint
+  // can take 5-15 min per agent, well beyond Node fetch's default 300s headersTimeout.
+  const resp = await undiciFetch(`${env.lyzrBaseUrl}/v3/inference/chat/`, {
     method: "POST",
     headers: { "x-api-key": env.lyzrApiKey, "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -39,16 +50,17 @@ export async function callAgent(env: Env, args: CallAgentArgs): Promise<string> 
       message: args.message,
       assets: [args.asset_id],
     }),
+    dispatcher: longRunningAgent,
   });
   if (resp.status === 402) {
-    const detail = await resp.json().catch(() => ({ detail: "" }));
+    const detail = await resp.json().catch(() => ({ detail: "" })) as { detail?: string };
     throw new Error(`credits exhausted: ${detail.detail ?? ""}`);
   }
   if (!resp.ok) {
     const detail = await resp.text().catch(() => "");
     throw new Error(`agent ${args.agent_id} failed: ${resp.status} ${detail.slice(0, 200)}`);
   }
-  const data = await resp.json();
+  const data = await resp.json() as { response?: string };
   if (typeof data?.response !== "string") {
     throw new Error(`agent returned no response field: ${JSON.stringify(data).slice(0, 300)}`);
   }

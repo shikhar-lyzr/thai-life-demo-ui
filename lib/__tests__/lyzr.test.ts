@@ -1,4 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+
+const { undiciFetchMock } = vi.hoisted(() => ({ undiciFetchMock: vi.fn() }));
+vi.mock("undici", async () => {
+  const actual = await vi.importActual<typeof import("undici")>("undici");
+  return { ...actual, fetch: undiciFetchMock };
+});
+
 import { uploadToLyzr, callAgent } from "../lyzr";
 import type { Env } from "../env";
 
@@ -11,6 +18,7 @@ const env: Env = {
 
 beforeEach(() => {
   vi.restoreAllMocks();
+  undiciFetchMock.mockReset();
 });
 
 describe("uploadToLyzr", () => {
@@ -46,10 +54,11 @@ describe("uploadToLyzr", () => {
 
 describe("callAgent", () => {
   it("posts inference body and returns response text", async () => {
-    global.fetch = vi.fn().mockResolvedValue({
+    undiciFetchMock.mockResolvedValue({
       ok: true,
+      status: 200,
       json: () => Promise.resolve({ response: "report markdown" }),
-    }) as unknown as typeof fetch;
+    });
     const out = await callAgent(env, {
       agent_id: "agent-1",
       user_id: "user-1",
@@ -58,8 +67,9 @@ describe("callAgent", () => {
       message: "Classify",
     });
     expect(out).toBe("report markdown");
-    const call = (global.fetch as unknown as ReturnType<typeof vi.fn>).mock.calls[0];
-    const body = JSON.parse((call[1] as RequestInit).body as string);
+    const call = undiciFetchMock.mock.calls[0];
+    expect(call[0]).toBe("https://lyzr.example/v3/inference/chat/");
+    const body = JSON.parse(call[1].body);
     expect(body.assets).toEqual(["asset-1"]);
     expect(body.agent_id).toBe("agent-1");
     expect(body.user_id).toBe("user-1");
@@ -68,32 +78,33 @@ describe("callAgent", () => {
   });
 
   it("throws on 402 credit exhaustion", async () => {
-    global.fetch = vi.fn().mockResolvedValue({
+    undiciFetchMock.mockResolvedValue({
       ok: false,
       status: 402,
       json: () => Promise.resolve({ detail: "Credits exhausted" }),
-    }) as unknown as typeof fetch;
+    });
     await expect(
       callAgent(env, { agent_id: "x", user_id: "x", session_id: "x", asset_id: "x", message: "x" })
     ).rejects.toThrow(/credits/i);
   });
 
   it("throws on non-200", async () => {
-    global.fetch = vi.fn().mockResolvedValue({
+    undiciFetchMock.mockResolvedValue({
       ok: false,
       status: 500,
       text: () => Promise.resolve("boom"),
-    }) as unknown as typeof fetch;
+    });
     await expect(
       callAgent(env, { agent_id: "x", user_id: "x", session_id: "x", asset_id: "x", message: "x" })
     ).rejects.toThrow(/agent/);
   });
 
   it("throws when response field missing", async () => {
-    global.fetch = vi.fn().mockResolvedValue({
+    undiciFetchMock.mockResolvedValue({
       ok: true,
+      status: 200,
       json: () => Promise.resolve({ something: "else" }),
-    }) as unknown as typeof fetch;
+    });
     await expect(
       callAgent(env, { agent_id: "x", user_id: "x", session_id: "x", asset_id: "x", message: "x" })
     ).rejects.toThrow(/response/);
