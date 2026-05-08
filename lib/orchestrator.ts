@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { uploadToLyzr, callAgent } from "./lyzr";
-import { callWrapper, pingWrapper } from "./wrapper";
+import { callWrapper, waitForWrapper } from "./wrapper";
 import { setJobStatus, setResult, updateStage, getJob } from "./jobs";
 import type { Env } from "./env";
 import { AGENTS } from "./types";
@@ -10,9 +10,10 @@ export async function processPdf(env: Env, jobId: string, pdfBytes: Buffer): Pro
   const job = getJob(jobId);
   const fileName = job?.file_name ?? "upload.pdf";
 
-  // Pre-warm the wrapper while we upload to Lyzr — Render free tier can spin
-  // down on idle (~50s cold-start). Fire-and-forget; we don't await it.
-  void pingWrapper(env);
+  // Kick wrapper wake-up in parallel with upload. Render free tier can take
+  // ~50s to come up. We start polling /health now and await it later, so the
+  // wake-up overlaps with the Lyzr upload.
+  const wrapperReady = waitForWrapper(env);
 
   // Stage 1: Upload (no VLM — wrapper handles VLM)
   let sourceAssetId: string;
@@ -27,10 +28,11 @@ export async function processPdf(env: Env, jobId: string, pdfBytes: Buffer): Pro
     return;
   }
 
-  // Stage 2: Wrapper VLM re-parse
+  // Stage 2: Wrapper VLM re-parse — wait for confirmed wake-up first
   let vlmAssetId: string;
   try {
     updateStage(jobId, "vlm_parse", { status: "running", started_at: Date.now() });
+    await wrapperReady; // resolves true on /health 200, or false after ~90s — either way we proceed; callWrapper has retry logic too
     const result = await callWrapper(env, sourceAssetId);
     vlmAssetId = result.asset_id;
     updateStage(jobId, "vlm_parse", {

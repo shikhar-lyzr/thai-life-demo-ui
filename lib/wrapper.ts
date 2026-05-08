@@ -12,15 +12,25 @@ export interface WrapperResult {
 // giving the wrapper a full cold-start cycle to come up before we give up.
 const COLD_START_BACKOFFS_MS = [3000, 8000, 15000, 30000, 60000];
 
-export async function pingWrapper(env: Env): Promise<void> {
-  // Fire-and-forget pre-warm. Caller does not await this — it just kicks the
-  // wrapper out of free-tier idle so by the time we POST /api/vlm-reparse it's
-  // ready to serve.
-  try {
-    await fetch(`${env.wrapperUrl}/health`, { method: "GET" });
-  } catch {
-    // ignored — pre-warm is best-effort
+const WAKE_POLL_INTERVAL_MS = 3000;
+const WAKE_TIMEOUT_MS = 90_000;
+
+// Poll /health until it returns 200 or the deadline expires. Resolves true if
+// the wrapper is verifiably awake, false if the deadline passes. Errors and
+// non-200 responses count as "still waking" — we keep polling.
+export async function waitForWrapper(env: Env, timeoutMs = WAKE_TIMEOUT_MS): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    try {
+      const resp = await fetch(`${env.wrapperUrl}/health`, { method: "GET" });
+      if (resp.ok) return true;
+    } catch {
+      // network error during cold-start — keep polling
+    }
+    if (Date.now() + WAKE_POLL_INTERVAL_MS >= deadline) break;
+    await new Promise((r) => setTimeout(r, WAKE_POLL_INTERVAL_MS));
   }
+  return false;
 }
 
 export async function callWrapper(env: Env, sourceAssetId: string): Promise<WrapperResult> {

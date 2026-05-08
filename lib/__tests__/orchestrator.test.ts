@@ -15,6 +15,8 @@ const env: Env = {
 beforeEach(() => {
   __resetJobStoreForTests();
   vi.restoreAllMocks();
+  // waitForWrapper does real /health polls; stub it out for unit tests.
+  vi.spyOn(wrapper, "waitForWrapper").mockResolvedValue(true);
 });
 
 describe("processPdf", () => {
