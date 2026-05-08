@@ -67,6 +67,7 @@ export async function callAgent(env: Env, args: CallAgentArgs): Promise<string> 
   });
 
   for (let attempt = 0; attempt <= AGENT_RETRY_BACKOFFS_MS.length; attempt++) {
+    const attemptStart = Date.now();
     // Network errors and AbortSignal timeouts are NOT retried — fall through to caller.
     const resp = await undiciFetch(`${env.lyzrBaseUrl}/v3/inference/chat/`, {
       method: "POST",
@@ -74,6 +75,7 @@ export async function callAgent(env: Env, args: CallAgentArgs): Promise<string> 
       body,
       dispatcher: longRunningAgent,
     });
+    const attemptElapsed = Date.now() - attemptStart;
 
     if (resp.status === 402) {
       const detail = (await resp.json().catch(() => ({ detail: "" }))) as { detail?: string };
@@ -82,7 +84,10 @@ export async function callAgent(env: Env, args: CallAgentArgs): Promise<string> 
 
     if (resp.status >= 500 && resp.status < 600 && attempt < AGENT_RETRY_BACKOFFS_MS.length) {
       // 5xx — retry after backoff
-      await resp.text().catch(() => "");
+      const detail = await resp.text().catch(() => "");
+      console.log(
+        `[callAgent] retry attempt=${attempt} agent=${args.agent_id} status=${resp.status} elapsed=${attemptElapsed}ms detail=${detail.slice(0, 80).replace(/\n/g, " ")}`
+      );
       await new Promise((r) => setTimeout(r, AGENT_RETRY_BACKOFFS_MS[attempt]));
       continue;
     }
