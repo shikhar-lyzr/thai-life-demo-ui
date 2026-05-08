@@ -52,32 +52,51 @@ export interface CallAgentArgs {
   message: string;
 }
 
+// Retry on 5xx (Lyzr edge transient — observed mid-stream during real runs).
+// Don't retry on 4xx (would just keep failing) or network/timeout errors
+// (probably hung agent — fail fast rather than waste another attempt).
+const AGENT_RETRY_BACKOFFS_MS = [5000, 15000];
+
 export async function callAgent(env: Env, args: CallAgentArgs): Promise<string> {
-  // Use undici directly with extended timeouts. Lyzr's inference endpoint
-  // can take 5-15 min per agent, well beyond Node fetch's default 300s headersTimeout.
-  const resp = await undiciFetch(`${env.lyzrBaseUrl}/v3/inference/chat/`, {
-    method: "POST",
-    headers: { "x-api-key": env.lyzrApiKey, "Content-Type": "application/json" },
-    body: JSON.stringify({
-      user_id: args.user_id,
-      agent_id: args.agent_id,
-      session_id: args.session_id,
-      message: args.message,
-      assets: [args.asset_id],
-    }),
-    dispatcher: longRunningAgent,
+  const body = JSON.stringify({
+    user_id: args.user_id,
+    agent_id: args.agent_id,
+    session_id: args.session_id,
+    message: args.message,
+    assets: [args.asset_id],
   });
-  if (resp.status === 402) {
-    const detail = await resp.json().catch(() => ({ detail: "" })) as { detail?: string };
-    throw new Error(`credits exhausted: ${detail.detail ?? ""}`);
+
+  for (let attempt = 0; attempt <= AGENT_RETRY_BACKOFFS_MS.length; attempt++) {
+    // Network errors and AbortSignal timeouts are NOT retried — fall through to caller.
+    const resp = await undiciFetch(`${env.lyzrBaseUrl}/v3/inference/chat/`, {
+      method: "POST",
+      headers: { "x-api-key": env.lyzrApiKey, "Content-Type": "application/json" },
+      body,
+      dispatcher: longRunningAgent,
+    });
+
+    if (resp.status === 402) {
+      const detail = (await resp.json().catch(() => ({ detail: "" }))) as { detail?: string };
+      throw new Error(`credits exhausted: ${detail.detail ?? ""}`);
+    }
+
+    if (resp.status >= 500 && resp.status < 600 && attempt < AGENT_RETRY_BACKOFFS_MS.length) {
+      // 5xx — retry after backoff
+      await resp.text().catch(() => "");
+      await new Promise((r) => setTimeout(r, AGENT_RETRY_BACKOFFS_MS[attempt]));
+      continue;
+    }
+
+    if (!resp.ok) {
+      const detail = await resp.text().catch(() => "");
+      throw new Error(`agent ${args.agent_id} failed: ${resp.status} ${detail.slice(0, 200)}`);
+    }
+
+    const data = (await resp.json()) as { response?: string };
+    if (typeof data?.response !== "string") {
+      throw new Error(`agent returned no response field: ${JSON.stringify(data).slice(0, 300)}`);
+    }
+    return data.response;
   }
-  if (!resp.ok) {
-    const detail = await resp.text().catch(() => "");
-    throw new Error(`agent ${args.agent_id} failed: ${resp.status} ${detail.slice(0, 200)}`);
-  }
-  const data = await resp.json() as { response?: string };
-  if (typeof data?.response !== "string") {
-    throw new Error(`agent returned no response field: ${JSON.stringify(data).slice(0, 300)}`);
-  }
-  return data.response;
+  throw new Error("callAgent: unreachable retry path");
 }

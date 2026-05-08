@@ -95,15 +95,65 @@ describe("callAgent", () => {
     ).rejects.toThrow(/credits/i);
   });
 
-  it("throws on non-200", async () => {
+  it("retries on 5xx and succeeds on second attempt", async () => {
+    vi.useFakeTimers();
+    undiciFetchMock
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 502,
+        text: () => Promise.resolve("Bad Gateway"),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: () => Promise.resolve({ response: "ok markdown" }),
+      });
+
+    const promise = callAgent(env, {
+      agent_id: "agent-1", user_id: "u", session_id: "s", asset_id: "a", message: "m",
+    });
+    await vi.advanceTimersByTimeAsync(60_000);
+    const out = await promise;
+    expect(out).toBe("ok markdown");
+    expect(undiciFetchMock).toHaveBeenCalledTimes(2);
+    vi.useRealTimers();
+  });
+
+  it("gives up after exhausting retries on persistent 5xx", async () => {
+    vi.useFakeTimers();
     undiciFetchMock.mockResolvedValue({
       ok: false,
-      status: 500,
-      text: () => Promise.resolve("boom"),
+      status: 502,
+      text: () => Promise.resolve("upstream"),
+    });
+    const promise = callAgent(env, {
+      agent_id: "x", user_id: "x", session_id: "x", asset_id: "x", message: "x",
+    });
+    await vi.advanceTimersByTimeAsync(120_000);
+    await expect(promise).rejects.toThrow(/agent/);
+    // 1 initial + 2 retries = 3 attempts
+    expect(undiciFetchMock).toHaveBeenCalledTimes(3);
+    vi.useRealTimers();
+  });
+
+  it("does NOT retry on 4xx", async () => {
+    undiciFetchMock.mockResolvedValue({
+      ok: false,
+      status: 400,
+      text: () => Promise.resolve("bad request"),
     });
     await expect(
       callAgent(env, { agent_id: "x", user_id: "x", session_id: "x", asset_id: "x", message: "x" })
-    ).rejects.toThrow(/agent/);
+    ).rejects.toThrow(/agent.*failed/i);
+    expect(undiciFetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("does NOT retry on network/timeout error", async () => {
+    undiciFetchMock.mockRejectedValue(new Error("AbortError"));
+    await expect(
+      callAgent(env, { agent_id: "x", user_id: "x", session_id: "x", asset_id: "x", message: "x" })
+    ).rejects.toThrow();
+    expect(undiciFetchMock).toHaveBeenCalledTimes(1);
   });
 
   it("throws when response field missing", async () => {
