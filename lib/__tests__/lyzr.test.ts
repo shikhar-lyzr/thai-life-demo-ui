@@ -11,8 +11,6 @@ import type { Env } from "../env";
 
 const env: Env = {
   lyzrApiKey: "sk-test",
-  wrapperKey: "wk-test",
-  wrapperUrl: "https://wrapper.example",
   lyzrBaseUrl: "https://lyzr.example",
 };
 
@@ -22,7 +20,7 @@ beforeEach(() => {
 });
 
 describe("uploadToLyzr", () => {
-  it("posts multipart and returns asset_id", async () => {
+  it("posts multipart with VLM query params and returns asset_id", async () => {
     global.fetch = vi.fn().mockResolvedValue({
       ok: true,
       json: () => Promise.resolve({ results: [{ success: true, asset_id: "abc-123" }] }),
@@ -30,7 +28,16 @@ describe("uploadToLyzr", () => {
     const id = await uploadToLyzr(env, Buffer.from("%PDF"), "test.pdf");
     expect(id).toBe("abc-123");
     const call = (global.fetch as unknown as ReturnType<typeof vi.fn>).mock.calls[0];
-    expect(call[0]).toBe("https://lyzr.example/v3/assets/upload");
+    const url = call[0] as string;
+    expect(url.startsWith("https://lyzr.example/v3/assets/upload?")).toBe(true);
+    // Parshva-confirmed VLM query-string shape — load-bearing
+    expect(url).toContain("parser_provider=lyzr_parse");
+    expect(url).toContain("parsing_mode=full");
+    expect(url).toContain("enable_vlm=true");
+    expect(url).toContain("vlm_provider=openai");
+    expect(url).toContain("vlm_model=gpt-4o");
+    expect(url).toContain("extract_tables=true");
+    expect(url).toContain("describe_images=true");
     expect((call[1] as RequestInit).headers).toMatchObject({ "x-api-key": "sk-test" });
   });
 

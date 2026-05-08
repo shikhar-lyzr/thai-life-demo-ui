@@ -39,9 +39,9 @@ describe("jobs store", () => {
 
   it("updateStage merges partial patches without losing prior fields", () => {
     const id = createJob("x.pdf");
-    updateStage(id, "vlm_parse", { status: "running", started_at: 5 });
-    updateStage(id, "vlm_parse", { asset_id: "vlm-1" });
-    const stage = getJob(id)!.stages.vlm_parse;
+    updateStage(id, "upload", { status: "running", started_at: 5 });
+    updateStage(id, "upload", { asset_id: "vlm-1" });
+    const stage = getJob(id)!.stages.upload;
     expect(stage.status).toBe("running");
     expect(stage.started_at).toBe(5);
     expect(stage.asset_id).toBe("vlm-1");

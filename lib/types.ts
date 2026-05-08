@@ -1,4 +1,4 @@
-export type StageName = "upload" | "vlm_parse" | "classification" | "extraction" | "summarisation";
+export type StageName = "upload" | "classification" | "extraction" | "summarisation";
 export type StageStatus = "pending" | "running" | "done" | "failed";
 export type AgentLabel = "classification" | "extraction" | "summarisation";
 

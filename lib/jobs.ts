@@ -21,7 +21,6 @@ export function createJob(file_name: string): string {
     status: "queued",
     stages: {
       upload: freshStage(),
-      vlm_parse: freshStage(),
       classification: freshStage(),
       extraction: freshStage(),
       summarisation: freshStage(),

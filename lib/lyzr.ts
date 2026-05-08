@@ -9,10 +9,25 @@ const longRunningAgent = new Agent({
   connectTimeout: 30_000,
 });
 
+// Lyzr's /v3/assets/upload requires parser config as URL query-string params,
+// NOT a parse_config form field (which silently no-ops). This shape is the
+// canonical Parshva-confirmed combo that produces a multi-page-readable asset
+// — verified end-to-end by Classification reporting is_bundle: true,
+// page_count: 8 on Scene_3.pdf. Do not change without re-verifying.
+const VLM_QUERY_PARAMS = new URLSearchParams({
+  parser_provider: "lyzr_parse",
+  parsing_mode: "full",
+  enable_vlm: "true",
+  vlm_provider: "openai",
+  vlm_model: "gpt-4o",
+  extract_tables: "true",
+  describe_images: "true",
+}).toString();
+
 export async function uploadToLyzr(env: Env, pdfBytes: Buffer, fileName: string): Promise<string> {
   const form = new FormData();
   form.append("files", new Blob([new Uint8Array(pdfBytes)], { type: "application/pdf" }), fileName);
-  const resp = await fetch(`${env.lyzrBaseUrl}/v3/assets/upload`, {
+  const resp = await fetch(`${env.lyzrBaseUrl}/v3/assets/upload?${VLM_QUERY_PARAMS}`, {
     method: "POST",
     headers: { "x-api-key": env.lyzrApiKey },
     body: form,

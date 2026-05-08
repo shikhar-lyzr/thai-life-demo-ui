@@ -1,8 +1,7 @@
 import type { JobState, StageName, StageStatus } from "@/lib/types";
 
 const STAGES: { key: StageName; label: string }[] = [
-  { key: "upload", label: "Upload" },
-  { key: "vlm_parse", label: "VLM Parse" },
+  { key: "upload", label: "Upload + VLM Parse" },
   { key: "classification", label: "Classify" },
   { key: "extraction", label: "Extract" },
   { key: "summarisation", label: "Summarise" },
@@ -32,7 +31,7 @@ function fmtMs(ms?: number): string {
 export function StageStepper({ job }: { job: JobState }) {
   return (
     <div className="rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-950">
-      <div className="grid grid-cols-5 gap-2 text-sm">
+      <div className="grid grid-cols-4 gap-2 text-sm">
         {STAGES.map(({ key, label }) => {
           const stage = job.stages[key];
           return (
