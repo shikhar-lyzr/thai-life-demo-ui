@@ -1,7 +1,9 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+
+const WRAPPER_HEALTH_URL = "https://vlm-reparse-wrapper.onrender.com/health";
 
 export function UploadForm() {
   const router = useRouter();
@@ -10,6 +12,12 @@ export function UploadForm() {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [dragOver, setDragOver] = useState(false);
+
+  // Pre-warm the wrapper from the user's browser — Render-to-Render calls
+  // don't trigger cold-start, but external requests do. Fire-and-forget on mount.
+  useEffect(() => {
+    fetch(WRAPPER_HEALTH_URL, { method: "GET", mode: "no-cors" }).catch(() => {});
+  }, []);
 
   function pickFile(f: File | null) {
     if (!f) return;
