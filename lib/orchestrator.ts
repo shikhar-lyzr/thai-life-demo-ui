@@ -39,11 +39,14 @@ export async function processPdf(env: Env, jobId: string, pdfBytes: Buffer): Pro
         updateChunk(jobId, idx, { idx, status: "pending", page_range: chunk.pageRange })
       );
 
+      // Strip .pdf extension before suffixing chunk index, then re-add — Lyzr's
+      // upload validates file type by extension and rejects `foo.pdf-chunk1`.
+      const fileBase = fileName.replace(/\.pdf$/i, "");
       assetIds = await mapWithConcurrency(chunks, UPLOAD_CONCURRENCY, async (chunk, idx) => {
         updateChunk(jobId, idx, { status: "running" });
         const chunkStart = Date.now();
         try {
-          const aid = await uploadWithRetry(env, chunk.buffer, `${fileName}-chunk${idx + 1}`);
+          const aid = await uploadWithRetry(env, chunk.buffer, `${fileBase}-chunk${idx + 1}.pdf`);
           updateChunk(jobId, idx, { status: "done", asset_id: aid, elapsed_ms: Date.now() - chunkStart });
           return aid;
         } catch (err) {

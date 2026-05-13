@@ -133,4 +133,21 @@ describe("processPdf chunked path", () => {
     expect(seenAssetIds).toHaveLength(3);
     seenAssetIds.forEach((ids) => expect(ids).toEqual(["asset-0", "asset-1"]));
   });
+
+  it("chunk filenames preserve the .pdf extension (Lyzr rejects e.g. 'foo.pdf-chunk1')", async () => {
+    const pdfBytes = await makePdf(15);
+    const seenNames: string[] = [];
+    vi.spyOn(lyzr, "uploadWithRetry").mockImplementation(async (_env, _buf, name) => {
+      seenNames.push(name);
+      return `asset-${seenNames.length - 1}`;
+    });
+    vi.spyOn(lyzr, "callAgent").mockResolvedValue("ok");
+
+    const id = createJob("big.pdf");
+    await processPdf(env, id, pdfBytes);
+
+    expect(seenNames).toEqual(["big-chunk1.pdf", "big-chunk2.pdf"]);
+    // None of the names ends in something other than .pdf
+    seenNames.forEach((n) => expect(n).toMatch(/\.pdf$/));
+  });
 });
