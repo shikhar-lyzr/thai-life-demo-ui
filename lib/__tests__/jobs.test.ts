@@ -3,6 +3,7 @@ import {
   createJob,
   getJob,
   updateStage,
+  updateChunk,
   setResult,
   setJobStatus,
   __resetJobStoreForTests,
@@ -65,5 +66,33 @@ describe("jobs store", () => {
     expect(() => updateStage("nope", "upload", { status: "running" })).not.toThrow();
     expect(() => setResult("nope", "classification", { raw: "x", agent: "classification" })).not.toThrow();
     expect(() => setJobStatus("nope", "completed")).not.toThrow();
+  });
+});
+
+describe("updateChunk", () => {
+  it("initializes the upload stage's chunks array and updates per-chunk state", () => {
+    const id = createJob("big.pdf");
+    updateStage(id, "upload", { status: "running", started_at: Date.now() });
+    updateChunk(id, 0, { idx: 0, status: "running", page_range: [1, 10] });
+    updateChunk(id, 1, { idx: 1, status: "running", page_range: [9, 18] });
+    const job = getJob(id);
+    expect(job?.stages.upload.chunks).toHaveLength(2);
+    expect(job?.stages.upload.chunks?.[0].page_range).toEqual([1, 10]);
+    expect(job?.stages.upload.chunks?.[1].page_range).toEqual([9, 18]);
+  });
+
+  it("merges patches into existing chunk state", () => {
+    const id = createJob("big.pdf");
+    updateChunk(id, 0, { idx: 0, status: "running", page_range: [1, 10] });
+    updateChunk(id, 0, { status: "done", asset_id: "asset-abc", elapsed_ms: 3000 });
+    const chunk = getJob(id)?.stages.upload.chunks?.[0];
+    expect(chunk?.status).toBe("done");
+    expect(chunk?.asset_id).toBe("asset-abc");
+    expect(chunk?.elapsed_ms).toBe(3000);
+    expect(chunk?.page_range).toEqual([1, 10]); // preserved
+  });
+
+  it("is a no-op for an unknown job_id", () => {
+    expect(() => updateChunk("missing", 0, { idx: 0, status: "running", page_range: [1, 10] })).not.toThrow();
   });
 });
