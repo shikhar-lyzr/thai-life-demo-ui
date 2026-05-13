@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import type { JobState, StageName, StageState, AgentResult, AgentLabel } from "./types";
+import type { JobState, StageName, StageState, AgentResult, AgentLabel, ChunkState } from "./types";
 
 const store = new Map<string, JobState>();
 
@@ -42,6 +42,18 @@ export function updateStage(job_id: string, stage: StageName, patch: Partial<Sta
     merged.elapsed_ms = merged.ended_at - merged.started_at;
   }
   job.stages[stage] = merged;
+}
+
+export function updateChunk(job_id: string, chunkIdx: number, patch: Partial<ChunkState>): void {
+  const job = store.get(job_id);
+  if (!job) return;
+  const stage = job.stages.upload;
+  const existing = stage.chunks ?? [];
+  const current = existing[chunkIdx] ?? ({ idx: chunkIdx } as ChunkState);
+  const merged: ChunkState = { ...current, ...patch, idx: chunkIdx };
+  const next = existing.slice();
+  next[chunkIdx] = merged;
+  job.stages.upload = { ...stage, chunks: next };
 }
 
 export function setResult(job_id: string, label: AgentLabel, result: AgentResult): void {

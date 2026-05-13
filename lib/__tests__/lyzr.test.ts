@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 const { undiciFetchMock } = vi.hoisted(() => ({ undiciFetchMock: vi.fn() }));
 vi.mock("undici", async () => {
@@ -6,7 +6,7 @@ vi.mock("undici", async () => {
   return { ...actual, fetch: undiciFetchMock };
 });
 
-import { uploadToLyzr, callAgent } from "../lyzr";
+import { uploadToLyzr, callAgent, uploadWithRetry } from "../lyzr";
 import type { Env } from "../env";
 
 const env: Env = {
@@ -70,7 +70,7 @@ describe("callAgent", () => {
       agent_id: "agent-1",
       user_id: "user-1",
       session_id: "sess-1",
-      asset_id: "asset-1",
+      asset_ids: ["asset-1"],
       message: "Classify",
     });
     expect(out).toBe("report markdown");
@@ -91,7 +91,7 @@ describe("callAgent", () => {
       json: () => Promise.resolve({ detail: "Credits exhausted" }),
     });
     await expect(
-      callAgent(env, { agent_id: "x", user_id: "x", session_id: "x", asset_id: "x", message: "x" })
+      callAgent(env, { agent_id: "x", user_id: "x", session_id: "x", asset_ids: ["x"], message: "x" })
     ).rejects.toThrow(/credits/i);
   });
 
@@ -110,7 +110,7 @@ describe("callAgent", () => {
       });
 
     const promise = callAgent(env, {
-      agent_id: "agent-1", user_id: "u", session_id: "s", asset_id: "a", message: "m",
+      agent_id: "agent-1", user_id: "u", session_id: "s", asset_ids: ["a"], message: "m",
     });
     await vi.advanceTimersByTimeAsync(60_000);
     const out = await promise;
@@ -127,7 +127,7 @@ describe("callAgent", () => {
       text: () => Promise.resolve("upstream"),
     });
     const promise = callAgent(env, {
-      agent_id: "x", user_id: "x", session_id: "x", asset_id: "x", message: "x",
+      agent_id: "x", user_id: "x", session_id: "x", asset_ids: ["x"], message: "x",
     });
     await vi.advanceTimersByTimeAsync(120_000);
     await expect(promise).rejects.toThrow(/agent/);
@@ -143,7 +143,7 @@ describe("callAgent", () => {
       text: () => Promise.resolve("bad request"),
     });
     await expect(
-      callAgent(env, { agent_id: "x", user_id: "x", session_id: "x", asset_id: "x", message: "x" })
+      callAgent(env, { agent_id: "x", user_id: "x", session_id: "x", asset_ids: ["x"], message: "x" })
     ).rejects.toThrow(/agent.*failed/i);
     expect(undiciFetchMock).toHaveBeenCalledTimes(1);
   });
@@ -151,7 +151,7 @@ describe("callAgent", () => {
   it("does NOT retry on network/timeout error", async () => {
     undiciFetchMock.mockRejectedValue(new Error("AbortError"));
     await expect(
-      callAgent(env, { agent_id: "x", user_id: "x", session_id: "x", asset_id: "x", message: "x" })
+      callAgent(env, { agent_id: "x", user_id: "x", session_id: "x", asset_ids: ["x"], message: "x" })
     ).rejects.toThrow();
     expect(undiciFetchMock).toHaveBeenCalledTimes(1);
   });
@@ -163,7 +163,60 @@ describe("callAgent", () => {
       json: () => Promise.resolve({ something: "else" }),
     });
     await expect(
-      callAgent(env, { agent_id: "x", user_id: "x", session_id: "x", asset_id: "x", message: "x" })
+      callAgent(env, { agent_id: "x", user_id: "x", session_id: "x", asset_ids: ["x"], message: "x" })
     ).rejects.toThrow(/response/);
+  });
+});
+
+describe("uploadWithRetry", () => {
+  const buf = Buffer.from("fake-pdf-bytes");
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("returns the asset_id on first-try success", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      new Response(JSON.stringify({ results: [{ success: true, asset_id: "asset-1" }] }), { status: 200 })
+    );
+    const out = await uploadWithRetry(env, buf, "f.pdf");
+    expect(out).toBe("asset-1");
+    expect(globalThis.fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("retries on 5xx and succeeds on a later attempt", async () => {
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(new Response("upstream", { status: 502 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ results: [{ success: true, asset_id: "asset-2" }] }), { status: 200 }));
+    const out = await uploadWithRetry(env, buf, "f.pdf", { backoffMs: [10, 20] });
+    expect(out).toBe("asset-2");
+    expect(globalThis.fetch).toHaveBeenCalledTimes(2);
+  });
+
+  it("does NOT retry on 4xx", async () => {
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(new Response("bad request", { status: 400 }));
+    await expect(uploadWithRetry(env, buf, "f.pdf", { backoffMs: [10, 20] })).rejects.toThrow(/upload failed: 400/);
+    expect(globalThis.fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("fails after exhausting retries on persistent 5xx", async () => {
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValue(new Response("upstream gone", { status: 503 }));
+    await expect(uploadWithRetry(env, buf, "f.pdf", { backoffMs: [10, 20] })).rejects.toThrow(/upload failed: 503/);
+    expect(globalThis.fetch).toHaveBeenCalledTimes(3); // initial + 2 retries
+  });
+
+  it("retries on network errors (e.g. socket reset)", async () => {
+    vi.spyOn(globalThis, "fetch")
+      .mockRejectedValueOnce(new TypeError("fetch failed: socket reset"))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ results: [{ success: true, asset_id: "asset-3" }] }), { status: 200 }));
+    const out = await uploadWithRetry(env, buf, "f.pdf", { backoffMs: [10, 20] });
+    expect(out).toBe("asset-3");
+    expect(globalThis.fetch).toHaveBeenCalledTimes(2);
   });
 });

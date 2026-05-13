@@ -44,11 +44,59 @@ export async function uploadToLyzr(env: Env, pdfBytes: Buffer, fileName: string)
   return first.asset_id as string;
 }
 
+const DEFAULT_UPLOAD_BACKOFFS_MS = [5000, 15000];
+
+/**
+ * Uploads a PDF with retry-on-transient-error semantics.
+ *
+ * Retries on:
+ *   - 5xx responses
+ *   - thrown errors from fetch (network failures, timeouts)
+ *
+ * Does NOT retry on 4xx (the request is malformed; retry won't help).
+ *
+ * Backoffs default to [5s, 15s] — two retries after the initial attempt.
+ */
+export async function uploadWithRetry(
+  env: Env,
+  pdfBytes: Buffer,
+  fileName: string,
+  opts?: { backoffMs?: number[] }
+): Promise<string> {
+  const backoffs = opts?.backoffMs ?? DEFAULT_UPLOAD_BACKOFFS_MS;
+  let lastErr: unknown = null;
+  for (let attempt = 0; attempt <= backoffs.length; attempt++) {
+    try {
+      return await uploadToLyzr(env, pdfBytes, fileName);
+    } catch (err) {
+      lastErr = err;
+      const msg = err instanceof Error ? err.message : String(err);
+      // Don't retry 4xx. Load-bearing: this parses the error message produced by
+      // uploadToLyzr (lib/lyzr.ts:37 — `upload failed: ${resp.status} ...`). If
+      // uploadToLyzr's error format changes, this regex will silently miss 4xx
+      // codes and start retrying them. Keep these two in sync.
+      const m = /^upload failed: (\d{3})/.exec(msg);
+      if (m) {
+        const code = parseInt(m[1], 10);
+        if (code >= 400 && code < 500) throw err;
+      }
+      if (attempt < backoffs.length) {
+        console.log(
+          `[uploadWithRetry] retry attempt=${attempt} file=${fileName} reason=${msg.slice(0, 120).replace(/\n/g, " ")}`
+        );
+        await new Promise((r) => setTimeout(r, backoffs[attempt]));
+        continue;
+      }
+    }
+  }
+  throw lastErr ?? new Error("uploadWithRetry: unreachable");
+}
+
 export interface CallAgentArgs {
   agent_id: string;
   user_id: string;
   session_id: string;
-  asset_id: string;
+  asset_ids: string[];
   message: string;
 }
 
@@ -63,7 +111,7 @@ export async function callAgent(env: Env, args: CallAgentArgs): Promise<string> 
     agent_id: args.agent_id,
     session_id: args.session_id,
     message: args.message,
-    assets: [args.asset_id],
+    assets: args.asset_ids,
   });
 
   for (let attempt = 0; attempt <= AGENT_RETRY_BACKOFFS_MS.length; attempt++) {
