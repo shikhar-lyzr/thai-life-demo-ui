@@ -4,6 +4,7 @@ import { use, useEffect, useState } from "react";
 import Link from "next/link";
 import type { JobState } from "@/lib/types";
 import { StageStepper } from "@/components/stage-stepper";
+import { ChunkStrip } from "@/components/chunk-strip";
 import { ResultSection } from "@/components/result-section";
 
 const POLL_INTERVAL_MS = 3000;
@@ -78,6 +79,7 @@ export default function JobPage({ params }: { params: Promise<{ id: string }> })
 
       <div className="mb-8">
         <StageStepper job={job} />
+        <ChunkStrip chunks={job.stages.upload.chunks} />
       </div>
 
       {job.error && (
