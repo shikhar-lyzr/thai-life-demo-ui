@@ -70,3 +70,45 @@ export async function splitPdfWithOverlap(
 
   return chunks;
 }
+
+/**
+ * Runs `fn(item, idx)` for each item with at most `limit` in flight at any time.
+ * Returns results in the input order. Rejects on the first error.
+ *
+ * Note: when fn throws, in-flight tasks continue to run to their natural
+ * completion (their results are discarded); we just don't await any further
+ * unstarted items.
+ */
+export async function mapWithConcurrency<T, R>(
+  items: T[],
+  limit: number,
+  fn: (item: T, idx: number) => Promise<R>
+): Promise<R[]> {
+  if (limit < 1) throw new Error(`limit must be >= 1 (got ${limit})`);
+  const results: R[] = new Array(items.length);
+  let nextIdx = 0;
+  let aborted = false;
+  let firstError: unknown = null;
+
+  async function worker(): Promise<void> {
+    while (true) {
+      if (aborted) return;
+      const idx = nextIdx++;
+      if (idx >= items.length) return;
+      try {
+        results[idx] = await fn(items[idx], idx);
+      } catch (err) {
+        if (!aborted) {
+          aborted = true;
+          firstError = err;
+        }
+        return;
+      }
+    }
+  }
+
+  const workers = Array.from({ length: Math.min(limit, items.length) }, () => worker());
+  await Promise.all(workers);
+  if (firstError) throw firstError;
+  return results;
+}

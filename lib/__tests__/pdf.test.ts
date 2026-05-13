@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { countPages, splitPdfWithOverlap } from "../pdf";
+import { countPages, splitPdfWithOverlap, mapWithConcurrency } from "../pdf";
 
 const SCENE3 = resolve(__dirname, "../../Scene_3.pdf");
 
@@ -100,5 +100,51 @@ describe("splitPdfWithOverlap", () => {
   it("throws if chunkSize <= overlap", async () => {
     const buf = await makePdf(20);
     await expect(splitPdfWithOverlap(buf, 2, 2)).rejects.toThrow(/chunkSize must be greater than overlap/i);
+  });
+});
+
+describe("mapWithConcurrency", () => {
+  it("returns results in input order even when fn completes out of order", async () => {
+    const items = [100, 50, 200, 10, 150];
+    const results = await mapWithConcurrency(items, 3, async (n) => {
+      await new Promise((r) => setTimeout(r, n));
+      return n * 2;
+    });
+    expect(results).toEqual([200, 100, 400, 20, 300]);
+  });
+
+  it("respects the concurrency limit", async () => {
+    let inFlight = 0;
+    let maxInFlight = 0;
+    const items = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+    await mapWithConcurrency(items, 3, async () => {
+      inFlight++;
+      maxInFlight = Math.max(maxInFlight, inFlight);
+      await new Promise((r) => setTimeout(r, 10));
+      inFlight--;
+    });
+    expect(maxInFlight).toBe(3);
+  });
+
+  it("propagates the first rejection without awaiting in-flight tasks past their next checkpoint", async () => {
+    const items = [1, 2, 3];
+    await expect(
+      mapWithConcurrency(items, 2, async (n) => {
+        if (n === 2) throw new Error("kaboom");
+        await new Promise((r) => setTimeout(r, 5));
+        return n;
+      })
+    ).rejects.toThrow("kaboom");
+  });
+
+  it("handles empty input", async () => {
+    const results = await mapWithConcurrency<number, number>([], 5, async (n) => n);
+    expect(results).toEqual([]);
+  });
+
+  it("passes item index to fn", async () => {
+    const items = ["a", "b", "c"];
+    const results = await mapWithConcurrency(items, 2, async (item, idx) => `${item}-${idx}`);
+    expect(results).toEqual(["a-0", "b-1", "c-2"]);
   });
 });
