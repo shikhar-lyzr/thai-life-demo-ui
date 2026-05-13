@@ -102,6 +102,40 @@ Merged to `main` and ran the same Scene_3 / Scene_4 / Scene_5 suite against the 
    - What's the safe `UPLOAD_CONCURRENCY` against his endpoint? We picked 5 conservatively; can it absorb more without rate-limiting?
 3. **Re-run Scene_4 verification with underwriter eyes.** I don't have ground truth for Scene_4's real patient. Worth a manual look at the chunked output (`/tmp/t11r_s4_full.json`) to confirm the "Thonburi Bamrungmuang" hits are real document content, not few-shot leakage.
 
+## End-of-day update (late 2026-05-14)
+
+After the post-merge prod verification, we kept going on three threads. State at signoff:
+
+### 1. Contamination scrub (option 2+3: tagged `<example>` blocks + adversarial output instruction)
+
+- Applied to all three agent prompts in Lyzr Studio: Classification, Extraction, Summarisation. Each prompt now has its worked example wrapped in `<example>...</example>` and a final "CRITICAL OUTPUT VERIFICATION" section.
+- Specific Scene_3 PII (3-2249-12378-26-0, 20-00015214) was stripped from format-guidance lines (Section 2 of Classification's HN list, Section 3 of Summarisation's THAI 13-DIGIT IDs rule). The PII still lives inside `<example>` blocks because that's the example content.
+- Validation against Scene_3 + Scene_4 (3 runs each):
+  - Scene_3 regression: s3_2 clean (8 pages), s3_3 only saw 1 page → Lyzr parser delivered only page 1 of Scene_3 on that run despite same code + same PDF. **Lyzr's parser is non-deterministic on the FAST PATH too**, not just chunked scanned PDFs. Important reframe.
+  - Scene_4 contamination: 2/3 runs clean (zero blocklist hits), 1/3 (s4_3) heavily contaminated with Scene_3 PII (Kittipong×9, Thonburi×18, HN×9, etc.). Prompt edits cut contamination from ~100% to ~33%.
+- **Bug B root cause is unresolved.** I initially claimed Lyzr's parser was hallucinating Scene_3 PII into Scene_4 chunks (based on Y/N probe showing s4_3 chunks return Y to Scene_3 markers, while s4_1's clean chunks return N). Shikhar correctly pushed back: gpt-4o has never been trained on Scene_3's private PII, so it can't hallucinate those specific strings into a Scene_4 OCR output. My theory was wrong. The Y/N probe may itself be unreliable on heavily-contaminated cases. Without Lyzr-side ability to dump the parsed content of a chunk's asset, we can't definitively tell if s4_3's contamination came from agent confabulation (Cause B from yesterday's diagnosis) or from something else in Lyzr's inference layer. Phase 1 of systematic-debugging is incomplete for this bug.
+
+### 2. JSON-only mode for Extraction + Summarisation (latency lever)
+
+- Goal: shrink Summarisation's 313s response time by dropping the bilingual Markdown brief (~30-50KB) and emitting only the JSON code block. Same for Extraction (its Markdown is ~15KB). Classification stays unchanged because its Markdown isn't the wall-time bottleneck.
+- Expected wall time: 5.3 min → ~3 min for an 8-page doc.
+- Designed and presented as paste-ready blocks to append to each prompt (Section 8 for Extraction, Section 7 for Summarisation). **NOT YET APPLIED** in Lyzr Studio. Next session should paste these and re-run validation.
+
+### 3. Things still open going into tomorrow
+
+- **Run the orchestrator-side blocklist scan (Path B / Cause B defense-in-depth).** Even if we can't isolate why s4_3 got contaminated, an output scan that flags Scene_3 markers (and Scene_5 markers, etc.) catches contamination regardless of source. ~30 lines in `lib/orchestrator.ts`. Designed, not built.
+- **Validate JSON-only mode.** Single Scene_3 + Scene_4 run after pasting the JSON-only blocks. Verify wall time drops and JSON is valid.
+- **Ask Parshva for a parsed-content dump capability.** If Lyzr can expose "show me the bytes that were sent to the agent for asset_id X," we can definitively close Bug B. Without that, I'm guessing about its root cause.
+- **PHI quarantine still awaiting Sri's call** on retention/handling.
+- **Doc corrections** to this brief's earlier sections (page-1-only reframe, Scene_4 leakage flag, revised Parshva asks) — partly done by this update; verify on next read.
+
+### 4. Updated Parshva ask list
+
+1. Slimmer per-chunk OCR output mode (smaller blob → keep Scene_5-class bundles under context window).
+2. How to surface true page count vs chunk count in agent outputs (today: chunked Scene_5 reports `page_count: 21`, not 169).
+3. **NEW**: Lyzr parser is non-deterministic even on fast-path uploads. Repro: upload Scene_3 multiple times; some runs deliver all 8 pages, some deliver only page 1. asset_id `e146b739-7b6e-4889-9816-569035d37cce` from late 2026-05-14 returned Y only to Kittipong (page 1) and N to all Thonburi/HN/Saranya markers, despite Scene_3.pdf being a known-good 8-page bundle.
+4. **NEW**: Can you expose a way to dump the actual parsed content sent to the agent for a given asset_id? We're trying to isolate whether contamination is parser-side or agent-side and can't tell without seeing what bytes the agent received. The asset_ids on your side under our key from late 2026-05-14 are listed in `/tmp/cv_s4_*_full.json`.
+
 ## Reference materials
 
 Same as `docs/session-brief-2026-05-13.md` Reference section. New additions:
