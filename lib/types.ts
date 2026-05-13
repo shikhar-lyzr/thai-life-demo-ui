@@ -2,12 +2,31 @@ export type StageName = "upload" | "classification" | "extraction" | "summarisat
 export type StageStatus = "pending" | "running" | "done" | "failed";
 export type AgentLabel = "classification" | "extraction" | "summarisation";
 
+export interface ChunkState {
+  /** 0-indexed position in the chunks array. */
+  idx: number;
+  status: StageStatus;
+  /** 1-indexed inclusive [start, end] page range in the source PDF. */
+  page_range: [number, number];
+  /** Set once the chunk finishes uploading. */
+  asset_id?: string;
+  /** Wall-clock for the upload of this chunk (after retries). */
+  elapsed_ms?: number;
+  /** Populated if the chunk's upload failed after all retries. */
+  error?: string;
+}
+
 export interface StageState {
   status: StageStatus;
   started_at?: number;
   ended_at?: number;
   elapsed_ms?: number;
+  /** Fast path (≤CHUNK_SIZE-page PDF): single asset_id. */
   asset_id?: string;
+  /** Chunked path (>CHUNK_SIZE-page PDF): one asset_id per chunk, in chunk order. */
+  asset_ids?: string[];
+  /** Chunked path: per-chunk progress for UI rendering. */
+  chunks?: ChunkState[];
   error?: string;
 }
 
