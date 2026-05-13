@@ -52,9 +52,29 @@ Constants are hardcoded at module scope: `CHUNK_SIZE=10`, `CHUNK_OVERLAP=2`, `UP
 
 Scene_3 fast-path regression preserved. Scene_5 — the prior demo blocker — now produces underwriter briefs that reference the real patient (pediatric child Korawit Sansongsak at Ekachai Hospital, Samut Sakhon), not the fabricated personas from yesterday's pre-chunking diagnosis.
 
+## Post-merge production verification (2026-05-14)
+
+Merged to `main` and ran the same Scene_3 / Scene_4 / Scene_5 suite against the deployed Render service (`https://thai-life-demo-ui.onrender.com`):
+
+- **Scene_3 (fast path):** ✅ completed in ~5 min. `is_bundle: true, page_count: 8, pages: 8`. Kittipong marker appears 11×. No regression from `main`.
+- **Scene_4 (49p, chunked, 6 chunks):** ✅ completed in ~17 min. `is_bundle: true, page_count: 6` (chunk-count). All 6 chunks uploaded clean, all 3 agents ran to completion.
+- **Scene_5 (169p, chunked, 21 chunks):** ❌ all 3 agents failed at ~5.4 min each with `400: "Context window exceeded, please change to a model with a larger context size."` All 21 chunks uploaded fine; the failure is in the agent inference call with 21 asset_ids in the payload.
+
+**Local Scene_5 had succeeded** (Task 11 retry) with the same code + same source PDF. The production failure happened because Lyzr's per-chunk VLM OCR output is non-deterministic in size — the production OCR happened to produce verbose-enough text that 21 chunks' combined input exceeded Sonnet 4.5's 200k context window. Threshold: 6 chunks fits cleanly, 21 chunks reliably exceeds. Files between those sizes are at risk of intermittent failure.
+
+**Demo implication:** the pipeline reliably handles PDFs up to ~60-70 pages (≤7 chunks). Scene_4 fits; Scene_5-class bundles need a different approach. Worth raising with Parshva and Beryl8 before the demo commitments.
+
+### Mitigation options (not yet implemented)
+
+1. Drop `describe_images=true` from `VLM_QUERY_PARAMS` to cut per-chunk verbosity. Cheapest test. Trade-off: agents lose image-description signal.
+2. Multi-call agent strategy: batch asset_ids into groups of ≤6, call each agent N times, merge results in the orchestrator. Real architecture change.
+3. Switch to a longer-context model (Gemini 1.5 Pro 1M, GPT-4.1, Claude Opus 4.6 1M context). Requires Lyzr-side support + invalidates prior validation.
+4. Slimmer per-chunk OCR via Lyzr-side prompt tuning. Parshva's call.
+
 ## Known limitations (carried forward)
 
 1. **Lyzr's per-page OCR still appears to deliver only page 1 of each chunk.** Scene_5 (169p split into 21 chunks) reports `page_count: 21` in Classification, not 169 — strongly suggests the parser is still doing one OCR page per asset. This means our chunking workaround delivers ~21× more content than the unchunked baseline (which was 1 page), but still only ~12% of the actual document. Each chunk's "page 1" is the most important page (patient ID, hospital ID, document header), so the agents have enough to produce coherent briefs, but rich per-page detail mid-document is still being lost. Worth a follow-up Parshva conversation: can his parser OCR all pages within a chunk, not just the first?
+   *Update 2026-05-14:* This limitation interacts with the new context-window finding above. If Parshva's parser DOES OCR all pages within a chunk (i.e., the page_count: 21 number is just the agent's interpretation, and per-chunk text actually is large), then context-window overflow on 21-chunk payloads makes sense — there really is a lot of text being delivered. Worth asking him both questions together.
 2. **`page_count` in Classification output is misleading for chunked jobs.** It reports chunk-count, not actual page count. Underwriters reading the JSON will see "page_count: 21" for a 169-page bundle. Document this in the UI or a tooltip.
 3. **Top-level upload-stage error doesn't include the failing chunk index.** When a chunk's `uploadWithRetry` exhausts retries, the top-level `stage.upload.error` is the raw 5xx message. Per-chunk error IS recorded at `stage.upload.chunks[idx].error`, but a quick scan of the top-level field is misleading. ~3-line fix (wrap the per-chunk catch's re-throw with `new Error(\`chunk ${idx+1} (pages ...): ${msg}\`)`). Code reviewer flagged this on Task 9 as Important; deferred to followup per scope.
 4. **Wall time on Scene_5 was ~28 min, vs. estimated ~12-15 min in the design.** Lyzr's per-chunk lazy parse seems to scale slightly with chunk count; or the 5-parallel cap is too low. Worth confirming with Parshva that we can safely raise concurrency.
@@ -75,8 +95,9 @@ Scene_3 fast-path regression preserved. Scene_5 — the prior demo blocker — n
 
 ## Immediate next actions
 
-1. **Decide on push-to-main and Render redeploy.** Branch is local-only. Render will auto-deploy on push to `main`. Likely flow: rebase / squash-merge `feat/vlm-chunking` → push → watch Render build → re-verify against the production URL.
-2. **Update Parshva.** Two concrete asks:
+1. ~~**Decide on push-to-main and Render redeploy.**~~ DONE — merged via PR #1 (commit `1bd76c1`), Render auto-deployed, prod e2e verified per the section above.
+2. **Update Parshva.** Three concrete asks now:
+   - **NEW**: Scene_5 (169p, 21 chunks) hits Sonnet 4.5's 200k context window when all 21 asset_ids are passed to a single `/v3/inference/chat/` call. Can he raise the model context (e.g., to Opus 4.6 1M, Gemini 1.5 Pro 1M)? Or is per-chunk OCR verbose enough that we should ask for a slimmer output mode?
    - Does his parser OCR all pages within a chunk, or only page 1? (Today's evidence: only page 1 per chunk.) If the former, we may be able to raise `CHUNK_SIZE` toward 10 without loss; if the latter, the chunking workaround is the limit.
    - What's the safe `UPLOAD_CONCURRENCY` against his endpoint? We picked 5 conservatively; can it absorb more without rate-limiting?
 3. **Re-run Scene_4 verification with underwriter eyes.** I don't have ground truth for Scene_4's real patient. Worth a manual look at the chunked output (`/tmp/t11r_s4_full.json`) to confirm the "Thonburi Bamrungmuang" hits are real document content, not few-shot leakage.
