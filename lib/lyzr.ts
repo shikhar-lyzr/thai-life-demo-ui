@@ -72,7 +72,7 @@ export async function uploadWithRetry(
       lastErr = err;
       const msg = err instanceof Error ? err.message : String(err);
       // Don't retry 4xx. Load-bearing: this parses the error message produced by
-      // uploadToLyzr (lib/lyzr.ts:36 — `upload failed: ${resp.status} ...`). If
+      // uploadToLyzr (lib/lyzr.ts:37 — `upload failed: ${resp.status} ...`). If
       // uploadToLyzr's error format changes, this regex will silently miss 4xx
       // codes and start retrying them. Keep these two in sync.
       const m = /^upload failed: (\d{3})/.exec(msg);
