@@ -48,7 +48,7 @@ export interface CallAgentArgs {
   agent_id: string;
   user_id: string;
   session_id: string;
-  asset_id: string;
+  asset_ids: string[];
   message: string;
 }
 
@@ -63,7 +63,7 @@ export async function callAgent(env: Env, args: CallAgentArgs): Promise<string> 
     agent_id: args.agent_id,
     session_id: args.session_id,
     message: args.message,
-    assets: [args.asset_id],
+    assets: args.asset_ids,
   });
 
   for (let attempt = 0; attempt <= AGENT_RETRY_BACKOFFS_MS.length; attempt++) {

@@ -32,7 +32,7 @@ export async function processPdf(env: Env, jobId: string, pdfBytes: Buffer): Pro
         agent_id: agent.agent_id,
         user_id: agent.user_id,
         session_id: randomUUID(),
-        asset_id: assetId,
+        asset_ids: [assetId],
         message: agent.message,
       });
       setResult(jobId, agent.label, { raw, agent: agent.label });

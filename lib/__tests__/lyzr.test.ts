@@ -70,7 +70,7 @@ describe("callAgent", () => {
       agent_id: "agent-1",
       user_id: "user-1",
       session_id: "sess-1",
-      asset_id: "asset-1",
+      asset_ids: ["asset-1"],
       message: "Classify",
     });
     expect(out).toBe("report markdown");
@@ -91,7 +91,7 @@ describe("callAgent", () => {
       json: () => Promise.resolve({ detail: "Credits exhausted" }),
     });
     await expect(
-      callAgent(env, { agent_id: "x", user_id: "x", session_id: "x", asset_id: "x", message: "x" })
+      callAgent(env, { agent_id: "x", user_id: "x", session_id: "x", asset_ids: ["x"], message: "x" })
     ).rejects.toThrow(/credits/i);
   });
 
@@ -110,7 +110,7 @@ describe("callAgent", () => {
       });
 
     const promise = callAgent(env, {
-      agent_id: "agent-1", user_id: "u", session_id: "s", asset_id: "a", message: "m",
+      agent_id: "agent-1", user_id: "u", session_id: "s", asset_ids: ["a"], message: "m",
     });
     await vi.advanceTimersByTimeAsync(60_000);
     const out = await promise;
@@ -127,7 +127,7 @@ describe("callAgent", () => {
       text: () => Promise.resolve("upstream"),
     });
     const promise = callAgent(env, {
-      agent_id: "x", user_id: "x", session_id: "x", asset_id: "x", message: "x",
+      agent_id: "x", user_id: "x", session_id: "x", asset_ids: ["x"], message: "x",
     });
     await vi.advanceTimersByTimeAsync(120_000);
     await expect(promise).rejects.toThrow(/agent/);
@@ -143,7 +143,7 @@ describe("callAgent", () => {
       text: () => Promise.resolve("bad request"),
     });
     await expect(
-      callAgent(env, { agent_id: "x", user_id: "x", session_id: "x", asset_id: "x", message: "x" })
+      callAgent(env, { agent_id: "x", user_id: "x", session_id: "x", asset_ids: ["x"], message: "x" })
     ).rejects.toThrow(/agent.*failed/i);
     expect(undiciFetchMock).toHaveBeenCalledTimes(1);
   });
@@ -151,7 +151,7 @@ describe("callAgent", () => {
   it("does NOT retry on network/timeout error", async () => {
     undiciFetchMock.mockRejectedValue(new Error("AbortError"));
     await expect(
-      callAgent(env, { agent_id: "x", user_id: "x", session_id: "x", asset_id: "x", message: "x" })
+      callAgent(env, { agent_id: "x", user_id: "x", session_id: "x", asset_ids: ["x"], message: "x" })
     ).rejects.toThrow();
     expect(undiciFetchMock).toHaveBeenCalledTimes(1);
   });
@@ -163,7 +163,7 @@ describe("callAgent", () => {
       json: () => Promise.resolve({ something: "else" }),
     });
     await expect(
-      callAgent(env, { agent_id: "x", user_id: "x", session_id: "x", asset_id: "x", message: "x" })
+      callAgent(env, { agent_id: "x", user_id: "x", session_id: "x", asset_ids: ["x"], message: "x" })
     ).rejects.toThrow(/response/);
   });
 });
