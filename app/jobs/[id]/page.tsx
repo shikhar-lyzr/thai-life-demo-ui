@@ -64,7 +64,7 @@ export default function JobPage({ params }: { params: Promise<{ id: string }> })
   }
 
   return (
-    <main className="mx-auto max-w-3xl px-6 py-10">
+    <main className="mx-auto max-w-5xl px-6 py-10">
       <div className="mb-4 flex items-center justify-between">
         <Link href="/" className="text-sm text-slate-500 hover:underline">
           ← New job
@@ -91,16 +91,19 @@ export default function JobPage({ params }: { params: Promise<{ id: string }> })
       <div className="space-y-6">
         <ResultSection
           title="Classification"
+          kind="classification"
           result={job.results.classification}
           stage={job.stages.classification}
         />
         <ResultSection
           title="Extraction"
+          kind="extraction"
           result={job.results.extraction}
           stage={job.stages.extraction}
         />
         <ResultSection
           title="Underwriter Brief"
+          kind="summarisation"
           result={job.results.summarisation}
           stage={job.stages.summarisation}
         />

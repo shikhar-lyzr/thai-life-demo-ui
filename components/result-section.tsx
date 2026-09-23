@@ -1,25 +1,37 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import type { AgentResult, StageState } from "@/lib/types";
+import type { AgentLabel, AgentResult, StageState } from "@/lib/types";
+import { extractAgentJson } from "@/lib/agent-json";
+import { ResultTable } from "@/components/result-tables";
 
 interface Props {
   title: string;
+  kind: AgentLabel;
   result: AgentResult | undefined;
   stage: StageState;
 }
 
-export function ResultSection({ title, result, stage }: Props) {
+export function ResultSection({ title, kind, result, stage }: Props) {
   const [copied, setCopied] = useState(false);
+  const [view, setView] = useState<"table" | "json">("table");
+  const data = useMemo(() => (result ? extractAgentJson(result.raw) : null), [result]);
+  const json = useMemo(() => (data ? JSON.stringify(data, null, 2) : null), [data]);
 
   async function copy() {
     if (!result) return;
-    await navigator.clipboard.writeText(result.raw);
+    await navigator.clipboard.writeText(json ?? result.raw);
     setCopied(true);
     setTimeout(() => setCopied(false), 1500);
   }
+
+  const rawView = result && (
+    <article className="prose prose-sm max-w-none break-words dark:prose-invert">
+      <ReactMarkdown remarkPlugins={[remarkGfm]}>{result.raw}</ReactMarkdown>
+    </article>
+  );
 
   return (
     <section className="rounded-xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-950">
@@ -30,12 +42,29 @@ export function ResultSection({ title, result, stage }: Props) {
           {stage.status === "failed" && (
             <span className="text-red-600 dark:text-red-400">Failed</span>
           )}
+          {stage.status === "done" && data && (
+            <div className="flex overflow-hidden rounded border border-slate-300 dark:border-slate-700">
+              {(["table", "json"] as const).map((v) => (
+                <button
+                  key={v}
+                  onClick={() => setView(v)}
+                  className={`px-2 py-1 ${
+                    view === v
+                      ? "bg-slate-900 text-white dark:bg-slate-100 dark:text-slate-900"
+                      : "hover:bg-slate-50 dark:hover:bg-slate-900"
+                  }`}
+                >
+                  {v === "table" ? "Table" : "JSON"}
+                </button>
+              ))}
+            </div>
+          )}
           {stage.status === "done" && result && (
             <button
               onClick={copy}
               className="rounded border border-slate-300 px-2 py-1 hover:bg-slate-50 dark:border-slate-700 dark:hover:bg-slate-900"
             >
-              {copied ? "Copied" : "Copy"}
+              {copied ? "Copied" : json ? "Copy JSON" : "Copy"}
             </button>
           )}
         </div>
@@ -52,11 +81,13 @@ export function ResultSection({ title, result, stage }: Props) {
             {stage.error ?? "Unknown error"}
           </pre>
         )}
-        {result && (
-          <article className="prose prose-sm max-w-none break-words dark:prose-invert">
-            <ReactMarkdown remarkPlugins={[remarkGfm]}>{result.raw}</ReactMarkdown>
-          </article>
+        {result && data && view === "table" && <ResultTable kind={kind} data={data} fallback={rawView} />}
+        {result && json && view === "json" && (
+          <pre className="max-h-[36rem] overflow-auto rounded-lg bg-slate-50 p-3 text-xs leading-relaxed dark:bg-slate-900">
+            {json}
+          </pre>
         )}
+        {result && !data && rawView}
       </div>
     </section>
   );
