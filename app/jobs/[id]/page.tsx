@@ -2,17 +2,32 @@
 
 import { use, useEffect, useState } from "react";
 import Link from "next/link";
-import type { JobState } from "@/lib/types";
+import type { AgentLabel, JobState, StageStatus } from "@/lib/types";
 import { StageStepper } from "@/components/stage-stepper";
 import { ChunkStrip } from "@/components/chunk-strip";
 import { ResultSection } from "@/components/result-section";
 
 const POLL_INTERVAL_MS = 3000;
 
+const TABS: { kind: AgentLabel; title: string }[] = [
+  { kind: "classification", title: "Classification" },
+  { kind: "extraction", title: "Extraction" },
+  { kind: "summarisation", title: "Underwriter Brief" },
+];
+
+// Same colours as the stage stepper glyphs.
+const TAB_DOT: Record<StageStatus, string> = {
+  done: "bg-green-600 dark:bg-green-400",
+  running: "animate-pulse bg-blue-600 dark:bg-blue-400",
+  failed: "bg-red-600 dark:bg-red-400",
+  pending: "bg-slate-300 dark:bg-slate-700",
+};
+
 export default function JobPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
   const [job, setJob] = useState<JobState | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [tab, setTab] = useState<AgentLabel>("classification");
 
   useEffect(() => {
     let cancelled = false;
@@ -64,7 +79,7 @@ export default function JobPage({ params }: { params: Promise<{ id: string }> })
   }
 
   return (
-    <main className="mx-auto max-w-5xl px-6 py-10">
+    <main className="mx-auto w-full max-w-5xl px-6 py-10">
       <div className="mb-4 flex items-center justify-between">
         <Link href="/" className="text-sm text-slate-500 hover:underline">
           ← New job
@@ -88,25 +103,30 @@ export default function JobPage({ params }: { params: Promise<{ id: string }> })
         </div>
       )}
 
-      <div className="space-y-6">
-        <ResultSection
-          title="Classification"
-          kind="classification"
-          result={job.results.classification}
-          stage={job.stages.classification}
-        />
-        <ResultSection
-          title="Extraction"
-          kind="extraction"
-          result={job.results.extraction}
-          stage={job.stages.extraction}
-        />
-        <ResultSection
-          title="Underwriter Brief"
-          kind="summarisation"
-          result={job.results.summarisation}
-          stage={job.stages.summarisation}
-        />
+      <div>
+        <div role="tablist" className="mb-4 flex gap-1 border-b border-slate-200 dark:border-slate-800">
+          {TABS.map(({ kind, title }) => (
+            <button
+              key={kind}
+              role="tab"
+              aria-selected={tab === kind}
+              onClick={() => setTab(kind)}
+              className={`-mb-px flex items-center gap-2 border-b-2 px-4 py-2 text-sm font-medium ${
+                tab === kind
+                  ? "border-slate-900 text-slate-900 dark:border-slate-100 dark:text-slate-100"
+                  : "border-transparent text-slate-500 hover:text-slate-800 dark:hover:text-slate-200"
+              }`}
+            >
+              <span className={`h-2 w-2 rounded-full ${TAB_DOT[job.stages[kind].status]}`} />
+              {title}
+            </button>
+          ))}
+        </div>
+        {TABS.map(({ kind, title }) => (
+          <div key={kind} role="tabpanel" hidden={tab !== kind}>
+            <ResultSection title={title} kind={kind} result={job.results[kind]} stage={job.stages[kind]} />
+          </div>
+        ))}
       </div>
     </main>
   );
