@@ -6,7 +6,7 @@ vi.mock("undici", async () => {
   return { ...actual, fetch: undiciFetchMock };
 });
 
-import { uploadToLyzr, callAgent, uploadWithRetry } from "../lyzr";
+import { uploadToLyzr, callAgent, uploadWithRetry, waitForParse } from "../lyzr";
 import type { Env } from "../env";
 
 const env: Env = {
@@ -218,5 +218,40 @@ describe("uploadWithRetry", () => {
     const out = await uploadWithRetry(env, buf, "f.pdf", { backoffMs: [10, 20] });
     expect(out).toBe("asset-3");
     expect(globalThis.fetch).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("waitForParse", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  const status = (parsing_status: string, parsing_error: string | null = null) =>
+    new Response(JSON.stringify({ asset_id: "a-1", parsing_status, parsing_error }), { status: 200 });
+
+  it("polls the asset until parsing_status is completed", async () => {
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(status("pending"))
+      .mockResolvedValueOnce(status("pending"))
+      .mockResolvedValueOnce(status("completed"));
+    await waitForParse(env, "a-1", { intervalMs: 5, timeoutMs: 1000 });
+    expect(globalThis.fetch).toHaveBeenCalledTimes(3);
+    const [url, init] = (globalThis.fetch as unknown as ReturnType<typeof vi.fn>).mock.calls[0];
+    expect(url).toBe("https://lyzr.example/v3/assets/a-1");
+    expect((init as RequestInit).headers).toMatchObject({ "x-api-key": "sk-test" });
+  });
+
+  it("throws when parsing fails", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(status("failed", "vlm crashed"));
+    await expect(waitForParse(env, "a-1", { intervalMs: 5, timeoutMs: 1000 })).rejects.toThrow(/a-1.*failed.*vlm crashed/);
+  });
+
+  it("throws when parsing does not complete before the timeout", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async () => status("pending"));
+    await expect(waitForParse(env, "a-1", { intervalMs: 5, timeoutMs: 30 })).rejects.toThrow(/a-1.*not parsed/);
   });
 });

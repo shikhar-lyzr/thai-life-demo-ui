@@ -20,9 +20,59 @@ async function makePdf(n: number): Promise<Buffer> {
 beforeEach(() => {
   __resetJobStoreForTests();
   vi.restoreAllMocks();
+  vi.spyOn(lyzr, "waitForParse").mockResolvedValue(undefined);
 });
 
 describe("processPdf", () => {
+  it("waits for the VLM parse to complete before calling agents", async () => {
+    vi.spyOn(lyzr, "uploadToLyzr").mockResolvedValue("vlm-1");
+    const order: string[] = [];
+    vi.spyOn(lyzr, "waitForParse").mockImplementation(async (_e, assetId) => {
+      await new Promise((r) => setTimeout(r, 20));
+      order.push(`parsed:${assetId}`);
+    });
+    vi.spyOn(lyzr, "callAgent").mockImplementation(async () => {
+      order.push("agent");
+      return "ok";
+    });
+
+    const id = createJob("x.pdf");
+    await processPdf(env, id, await makePdf(1));
+    expect(order).toEqual(["parsed:vlm-1", "agent", "agent", "agent"]);
+  });
+
+  it("waits for every chunk's parse on the chunked path", async () => {
+    let n = 0;
+    vi.spyOn(lyzr, "uploadWithRetry").mockImplementation(async () => `chunk-${++n}`);
+    const parsed: string[] = [];
+    vi.spyOn(lyzr, "waitForParse").mockImplementation(async (_e, assetId) => {
+      parsed.push(assetId);
+    });
+    const agentSpy = vi.spyOn(lyzr, "callAgent").mockImplementation(async () => {
+      expect(parsed).toHaveLength(n);
+      return "ok";
+    });
+
+    const id = createJob("x.pdf");
+    await processPdf(env, id, await makePdf(25));
+    expect(parsed.sort()).toEqual(["chunk-1", "chunk-2", "chunk-3"]);
+    expect(agentSpy).toHaveBeenCalledTimes(3);
+  });
+
+  it("parse failure marks the upload stage failed and skips agents", async () => {
+    vi.spyOn(lyzr, "uploadToLyzr").mockResolvedValue("vlm-1");
+    vi.spyOn(lyzr, "waitForParse").mockRejectedValue(new Error("asset vlm-1 parse failed: boom"));
+    const agentSpy = vi.spyOn(lyzr, "callAgent");
+
+    const id = createJob("x.pdf");
+    await processPdf(env, id, await makePdf(1));
+    const job = getJob(id);
+    expect(job?.status).toBe("failed");
+    expect(job?.stages.upload.status).toBe("failed");
+    expect(job?.stages.upload.error).toContain("parse failed");
+    expect(agentSpy).not.toHaveBeenCalled();
+  });
+
   it("runs upload→3 agents in parallel and finishes completed", async () => {
     vi.spyOn(lyzr, "uploadToLyzr").mockResolvedValue("vlm-1");
     vi.spyOn(lyzr, "callAgent").mockImplementation(async (_e, args) => `result:${args.agent_id}`);

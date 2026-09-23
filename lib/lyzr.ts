@@ -92,6 +92,51 @@ export async function uploadWithRetry(
   throw lastErr ?? new Error("uploadWithRetry: unreachable");
 }
 
+const PARSE_DONE = new Set(["completed", "success", "done"]);
+const PARSE_FAILED = new Set(["failed", "error"]);
+
+/**
+ * Polls GET /v3/assets/:id until the VLM parse finishes.
+ *
+ * /v3/assets/upload returns before parsing is done: parsing_status stays
+ * "pending" for ~30s on the 8-page Scene_3. Agents called before it reaches
+ * "completed" each read a different partial document (observed 2026-09-23:
+ * Classification saw 2 of 8 pages, Summarisation saw a "blank template").
+ *
+ * Status-check errors (network, 5xx) are retried until the timeout.
+ */
+export async function waitForParse(
+  env: Env,
+  assetId: string,
+  opts?: { intervalMs?: number; timeoutMs?: number }
+): Promise<void> {
+  const intervalMs = opts?.intervalMs ?? 3000;
+  const timeoutMs = opts?.timeoutMs ?? 10 * 60 * 1000;
+  const deadline = Date.now() + timeoutMs;
+  let last = "unknown";
+  while (Date.now() < deadline) {
+    let data: { parsing_status?: string | null; parsing_error?: string | null } | null = null;
+    try {
+      const resp = await fetch(`${env.lyzrBaseUrl}/v3/assets/${assetId}`, {
+        headers: { "x-api-key": env.lyzrApiKey },
+      });
+      if (resp.ok) data = await resp.json();
+      else last = `http ${resp.status}`;
+    } catch (err) {
+      last = `status check error: ${err instanceof Error ? err.message : String(err)}`;
+    }
+    if (data) {
+      last = data.parsing_status ?? "unknown";
+      if (PARSE_DONE.has(last)) return;
+      if (PARSE_FAILED.has(last) || data.parsing_error) {
+        throw new Error(`asset ${assetId} parse failed: ${data.parsing_error ?? last}`);
+      }
+    }
+    await new Promise((r) => setTimeout(r, intervalMs));
+  }
+  throw new Error(`asset ${assetId} not parsed after ${Math.round(timeoutMs / 1000)}s (last status: ${last})`);
+}
+
 export interface CallAgentArgs {
   agent_id: string;
   user_id: string;

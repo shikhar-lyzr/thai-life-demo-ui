@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { uploadToLyzr, uploadWithRetry, callAgent } from "./lyzr";
+import { uploadToLyzr, uploadWithRetry, waitForParse, callAgent } from "./lyzr";
 import { setJobStatus, setResult, updateStage, updateChunk, getJob } from "./jobs";
 import type { Env } from "./env";
 import { AGENTS } from "./types";
@@ -24,6 +24,7 @@ export async function processPdf(env: Env, jobId: string, pdfBytes: Buffer): Pro
     if (pageCount <= CHUNK_SIZE) {
       // FAST PATH (≤10p) — preserves today's validated behavior, no pdf-lib round-trip.
       const assetId = await uploadToLyzr(env, pdfBytes, fileName);
+      await waitForParse(env, assetId);
       assetIds = [assetId];
       updateStage(jobId, "upload", {
         status: "done",
@@ -47,6 +48,7 @@ export async function processPdf(env: Env, jobId: string, pdfBytes: Buffer): Pro
         const chunkStart = Date.now();
         try {
           const aid = await uploadWithRetry(env, chunk.buffer, `${fileBase}-chunk${idx + 1}.pdf`);
+          await waitForParse(env, aid);
           updateChunk(jobId, idx, { status: "done", asset_id: aid, elapsed_ms: Date.now() - chunkStart });
           return aid;
         } catch (err) {
