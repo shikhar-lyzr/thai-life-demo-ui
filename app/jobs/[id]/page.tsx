@@ -28,17 +28,25 @@ export default function JobPage({ params }: { params: Promise<{ id: string }> })
   const [job, setJob] = useState<JobState | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [tab, setTab] = useState<AgentLabel>("classification");
+  // Jobs live in server memory; a restart (deploy, idle spin-down) drops them.
+  const [lost, setLost] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
+    let loaded = false;
     async function poll() {
       try {
         const resp = await fetch(`/api/jobs/${id}`);
+        if (resp.status === 404 && loaded) {
+          if (!cancelled) setLost(true);
+          return; // stop polling: the job is gone, not delayed
+        }
         if (!resp.ok) {
           throw new Error(`HTTP ${resp.status}`);
         }
         const data: JobState = await resp.json();
         if (cancelled) return;
+        loaded = true;
         setJob(data);
         setError(null);
         if (data.status === "completed" || data.status === "failed") {
@@ -89,13 +97,24 @@ export default function JobPage({ params }: { params: Promise<{ id: string }> })
 
       <h1 className="mb-1 text-2xl font-semibold tracking-tight">{job.file_name}</h1>
       <p className="mb-6 text-sm text-slate-500">
-        Status: <span className="font-medium">{job.status}</span>
+        Status: <span className="font-medium">{lost ? "interrupted" : job.status}</span>
       </p>
 
       <div className="mb-8">
         <StageStepper job={job} />
         <ChunkStrip chunks={job.stages.upload.chunks} />
       </div>
+
+      {lost && (
+        <div className="mb-6 rounded-md border border-amber-300 bg-amber-50 p-4 text-sm text-amber-800 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-300">
+          This job is no longer on the server. The server restarted, which clears jobs that were still
+          running. Results shown below are from before the restart.{" "}
+          <Link href="/" className="font-medium underline">
+            Upload the file again
+          </Link>
+          .
+        </div>
+      )}
 
       {job.error && (
         <div className="mb-6 rounded-md border border-red-300 bg-red-50 p-4 text-sm text-red-700 dark:border-red-900 dark:bg-red-950/40 dark:text-red-300">
