@@ -7,7 +7,8 @@ export type AgentJson = Record<string, unknown>;
  * stray preamble (Summarisation has emitted a ```python block first).
  * Summarisation also puts raw line breaks and unescaped quotes inside string
  * values, which JSON.parse rejects, so those are repaired first. Tries fences
- * last-first and returns the first object that parses.
+ * last-first and returns the first object that parses. Extraction has also
+ * returned a bare array of documents, which is wrapped as { documents }.
  */
 export function extractAgentJson(raw: string): AgentJson | null {
   const fence = /```json\s*([\s\S]*?)```/g;
@@ -18,7 +19,11 @@ export function extractAgentJson(raw: string): AgentJson | null {
   for (const body of bodies.reverse()) {
     try {
       const parsed: unknown = JSON.parse(repairStrings(body));
-      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) return parsed as AgentJson;
+      if (Array.isArray(parsed)) {
+        if (parsed.length && parsed.every((d) => d && typeof d === "object" && !Array.isArray(d))) return { documents: parsed };
+        continue;
+      }
+      if (parsed && typeof parsed === "object") return parsed as AgentJson;
     } catch {
       // try the previous fence
     }

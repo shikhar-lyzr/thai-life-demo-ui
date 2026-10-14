@@ -2,32 +2,24 @@
 
 import { use, useEffect, useState } from "react";
 import Link from "next/link";
-import type { AgentLabel, JobState, StageStatus } from "@/lib/types";
+import type { JobState } from "@/lib/types";
 import { StageStepper } from "@/components/stage-stepper";
 import { ChunkStrip } from "@/components/chunk-strip";
-import { ResultSection } from "@/components/result-section";
+import { CaseView } from "@/components/case-view";
 
 const POLL_INTERVAL_MS = 3000;
 
-const TABS: { kind: AgentLabel; title: string }[] = [
-  { kind: "classification", title: "Classification" },
-  { kind: "extraction", title: "Extraction" },
-  { kind: "summarisation", title: "Underwriter Brief" },
-];
-
-// Same colours as the stage stepper glyphs.
-const TAB_DOT: Record<StageStatus, string> = {
-  done: "bg-green-600 dark:bg-green-400",
-  running: "animate-pulse bg-blue-600 dark:bg-blue-400",
-  failed: "bg-red-600 dark:bg-red-400",
-  pending: "bg-slate-300 dark:bg-slate-700",
+const STATUS_LABEL: Record<JobState["status"], string> = {
+  queued: "Queued",
+  running: "Processing",
+  completed: "Ready for review",
+  failed: "Needs attention",
 };
 
 export default function JobPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
   const [job, setJob] = useState<JobState | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [tab, setTab] = useState<AgentLabel>("classification");
   // Jobs live in server memory; a restart (deploy, idle spin-down) drops them.
   const [lost, setLost] = useState(false);
 
@@ -97,7 +89,7 @@ export default function JobPage({ params }: { params: Promise<{ id: string }> })
 
       <h1 className="mb-1 text-2xl font-semibold tracking-tight">{job.file_name}</h1>
       <p className="mb-6 text-sm text-slate-500">
-        Status: <span className="font-medium">{lost ? "interrupted" : job.status}</span>
+        Status: <span className="font-medium">{lost ? "Interrupted" : STATUS_LABEL[job.status]}</span>
       </p>
 
       <div className="mb-8">
@@ -122,31 +114,7 @@ export default function JobPage({ params }: { params: Promise<{ id: string }> })
         </div>
       )}
 
-      <div>
-        <div role="tablist" className="mb-4 flex gap-1 border-b border-slate-200 dark:border-slate-800">
-          {TABS.map(({ kind, title }) => (
-            <button
-              key={kind}
-              role="tab"
-              aria-selected={tab === kind}
-              onClick={() => setTab(kind)}
-              className={`-mb-px flex items-center gap-2 border-b-2 px-4 py-2 text-sm font-medium ${
-                tab === kind
-                  ? "border-slate-900 text-slate-900 dark:border-slate-100 dark:text-slate-100"
-                  : "border-transparent text-slate-500 hover:text-slate-800 dark:hover:text-slate-200"
-              }`}
-            >
-              <span className={`h-2 w-2 rounded-full ${TAB_DOT[job.stages[kind].status]}`} />
-              {title}
-            </button>
-          ))}
-        </div>
-        {TABS.map(({ kind, title }) => (
-          <div key={kind} role="tabpanel" hidden={tab !== kind}>
-            <ResultSection title={title} kind={kind} result={job.results[kind]} stage={job.stages[kind]} />
-          </div>
-        ))}
-      </div>
+      <CaseView job={job} />
     </main>
   );
 }

@@ -1,10 +1,10 @@
 import type { JobState, StageName, StageStatus } from "@/lib/types";
 
 const STAGES: { key: StageName; label: string }[] = [
-  { key: "upload", label: "Upload + VLM Parse" },
-  { key: "classification", label: "Classify" },
-  { key: "extraction", label: "Extract" },
-  { key: "summarisation", label: "Summarise" },
+  { key: "upload", label: "Read documents" },
+  { key: "classification", label: "Identify documents" },
+  { key: "extraction", label: "Extract details" },
+  { key: "summarisation", label: "Write brief" },
 ];
 
 function statusGlyph(status: StageStatus) {

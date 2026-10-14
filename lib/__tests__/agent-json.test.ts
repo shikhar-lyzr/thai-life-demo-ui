@@ -22,6 +22,13 @@ describe("extractAgentJson", () => {
     expect(extractAgentJson(raw)).toEqual({ financial_signals: 'Payment: "Self Pay - P001" — full self-pay', n: 1 });
   });
 
+  it("wraps a bare array of documents", () => {
+    const raw = '```json\n[{"document_type": "National ID Card"}, {"document_type": "Medical Certificate"}]\n```';
+    expect(extractAgentJson(raw)).toEqual({
+      documents: [{ document_type: "National ID Card" }, { document_type: "Medical Certificate" }],
+    });
+  });
+
   it("returns null when no fence parses", () => {
     expect(extractAgentJson("no json here")).toBeNull();
     expect(extractAgentJson("```json\n{broken\n```")).toBeNull();
